@@ -11,10 +11,10 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.js"></script>
 
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 
     <style>
-        * {
+        *, *::before, *::after {
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             -webkit-tap-highlight-color: transparent;
             box-sizing: border-box;
@@ -23,18 +23,1198 @@
         html, body {
             margin: 0;
             padding: 0;
-            min-height: 100vh;
-            background: #0f172a;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0a0f1c;
             display: flex;
             justify-content: center;
-            overscroll-behavior: none;
+            align-items: center;
         }
 
         #root {
             width: 100%;
-            min-height: 100vh;
+            height: 100vh;
+            height: 100dvh;
             display: flex;
             justify-content: center;
+            align-items: center;
+        }
+
+        .app-shell {
+            width: 100%;
+            height: 100%;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 120px rgba(0, 0, 0, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        @media (min-width: 768px) {
+            .app-shell { 
+                max-width: 1024px;
+                height: 95vh;
+                height: 95dvh;
+                border-radius: 24px;
+            }
+            .menu-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+
+        @media (max-width: 767px) {
+            .app-shell { 
+                max-width: 100%;
+                height: 100vh;
+                height: 100dvh;
+                border-radius: 0;
+            }
+            .menu-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (min-width: 1280px) {
+            .app-shell { 
+                max-width: 1200px;
+                height: 92vh;
+                height: 92dvh;
+                border-radius: 28px;
+            }
+            .menu-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+
+        .tap { 
+            cursor: pointer; 
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease; 
+        }
+        .tap:active { 
+            transform: scale(0.96); 
+            transition: transform 0.08s ease; 
+        }
+
+        .content-scroll {
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .content-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .content-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .content-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 200;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .modal-sheet {
+            background: #ffffff;
+            width: 100%;
+            max-width: 620px;
+            max-height: 88vh;
+            max-height: 88dvh;
+            border-radius: 20px 20px 0 0;
+            overflow-y: auto;
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.25);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+            border-color: #818cf8;
+        }
+
+        .pulse-dot {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .gradient-shimmer {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            background-size: 200% 200%;
+            animation: shimmer 3s ease infinite;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .new-tx-highlight {
+            animation: slideInRight 0.5s cubic-bezier(0.16, 1, 0.3, 1), highlightFade 2s ease-in-out;
+        }
+
+        @keyframes highlightFade {
+            0% { background-color: #dbeafe; }
+            100% { background-color: transparent; }
+        }
+
+        .live-indicator {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.95); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+        const DB_NAME = 'kasirku_v9';
+        const db = new Dexie(DB_NAME);
+        
+        db.version(1).stores({
+            users: '++id, username',
+            companies: '++id, userId',
+            menus: '++id, companyId, category',
+            stocks: '++id, companyId',
+            txs: '++id, companyId, createdAt',
+            opex: '++id, companyId, createdAt',
+            waste: '++id, companyId, createdAt',
+        });
+
+        db.version(2).stores({
+            users: '++id, username',
+            companies: '++id, userId',
+            menus: '++id, companyId, category',
+            stocks: '++id, companyId',
+            txs: '++id, companyId, createdAt',
+            opex: '++id, companyId, createdAt',
+            waste: '++id, companyId, createdAt',
+            sessions: '++id, userId, lastActive'
+        }).upgrade(async tx => {
+            const existingUsers = await tx.table('users').count();
+            if (existingUsers === 0) {
+                console.log('Fresh database - ready for new data');
+            }
+            console.log('DB upgraded to v2 with sessions table');
+        });
+
+        db.open().then(() => {
+            console.log(`IndexedDB "${DB_NAME}" ready`);
+        }).catch(err => {
+            console.error('Database error:', err);
+            alert('Gagal membuka database. Coba refresh halaman.');
+        });
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [isSignUp, setIsSignUp] = useState(false);
+            const [authForm, setAuthForm] = useState({ username: '', password: '' });
+
+            const [companies, setCompanies] = useState([]);
+            const [activeCompany, setActiveCompany] = useState(null);
+            const [newCompany, setNewCompany] = useState({ name: '', type: 'Kuliner' });
+
+            const [tab, setTab] = useState('kasir');
+            const [menus, setMenus] = useState([]);
+            const [stocks, setStocks] = useState([]);
+            const [txs, setTxs] = useState([]);
+            const [opexList, setOpexList] = useState([]);
+            const [cart, setCart] = useState([]);
+
+            const [aiResult, setAiResult] = useState(null);
+            const [aiLoading, setAiLoading] = useState(false);
+
+            const [modal, setModal] = useState(null);
+            const [receiptData, setReceiptData] = useState(null);
+            const [editMenu, setEditMenu] = useState(null);
+
+            const [fOpex, setFOpex] = useState({ name: '', amount: '', category: 'Listrik / Air' });
+            const [fWaste, setFWaste] = useState({ stockId: '', qty: '', note: '' });
+            const [fBahan, setFBahan] = useState({ name: '', unit: 'pcs', price: '', qty: '' });
+            const [fMenu, setFMenu] = useState({
+                name: '',
+                price: '',
+                icon: '📦',
+                category: 'Makanan',
+                ingredients: [{ stockId: '', qty: '' }],
+            });
+            const [activeCategory, setActiveCategory] = useState('Semua');
+            const [newTxIds, setNewTxIds] = useState(new Set());
+            const [liveUpdateCount, setLiveUpdateCount] = useState(0);
+            const pollingRef = useRef(null);
+            const prevTxCountRef = useRef(0);
+
+            useEffect(() => {
+                const checkExistingSession = async () => {
+                    try {
+                        const savedSession = localStorage.getItem('kasirku_session_userId');
+                        if (savedSession) {
+                            const userId = parseInt(savedSession);
+                            const found = await db.users.get(userId);
+                            if (found) {
+                                setUser(found);
+                                const list = await db.companies.where('userId').equals(userId).toArray();
+                                setCompanies(list);
+                                const savedCompanyId = localStorage.getItem('kasirku_session_companyId');
+                                if (savedCompanyId) {
+                                    const company = list.find(c => c.id === parseInt(savedCompanyId));
+                                    if (company) setActiveCompany(company);
+                                    else setActiveCompany(list[0] || null);
+                                } else {
+                                    setActiveCompany(list[0] || null);
+                                }
+                                console.log('Session restored for:', found.username);
+                            } else {
+                                localStorage.removeItem('kasirku_session_userId');
+                                localStorage.removeItem('kasirku_session_companyId');
+                            }
+                        }
+                    } catch (err) {
+                        console.log('Session check failed, will login fresh');
+                    }
+                };
+                
+                db.open().then(() => checkExistingSession()).catch(() => {
+                    console.log('Waiting for database...');
+                    setTimeout(checkExistingSession, 1000);
+                });
+            }, []);
+
+            useEffect(() => {
+                if (user) {
+                    localStorage.setItem('kasirku_session_userId', user.id.toString());
+                } else {
+                    localStorage.removeItem('kasirku_session_userId');
+                }
+            }, [user]);
+
+            useEffect(() => {
+                if (activeCompany) {
+                    localStorage.setItem('kasirku_session_companyId', activeCompany.id.toString());
+                } else {
+                    localStorage.removeItem('kasirku_session_companyId');
+                }
+            }, [activeCompany]);
+
+            const loadCompanies = useCallback(async (userId) => {
+                const list = await db.companies.where('userId').equals(userId).toArray();
+                setCompanies(list);
+                setActiveCompany(list[0] || null);
+            }, []);
+
+            const loadTenantData = useCallback(async (showHighlights = false) => {
+                if (!activeCompany) return;
+                const cid = activeCompany.id;
+                const [m, s, t, o] = await Promise.all([
+                    db.menus.where('companyId').equals(cid).toArray(),
+                    db.stocks.where('companyId').equals(cid).toArray(),
+                    db.txs.where('companyId').equals(cid).reverse().sortBy('createdAt'),
+                    db.opex.where('companyId').equals(cid).reverse().sortBy('createdAt'),
+                ]);
+                
+                if (showHighlights && t.length > prevTxCountRef.current) {
+                    const newIds = new Set();
+                    const currentIds = new Set(txs.map(tx => tx.id));
+                    t.forEach(tx => {
+                        if (!currentIds.has(tx.id) && tx.id) {
+                            newIds.add(tx.id);
+                        }
+                    });
+                    setNewTxIds(newIds);
+                    setLiveUpdateCount(prev => prev + 1);
+                    
+                    setTimeout(() => {
+                        setNewTxIds(new Set());
+                    }, 3000);
+                }
+                
+                prevTxCountRef.current = t.length;
+                setMenus(m);
+                setStocks(s);
+                setTxs(t);
+                setOpexList(o);
+            }, [activeCompany, txs]);
+
+            useEffect(() => {
+                if (activeCompany) {
+                    loadTenantData(true);
+                }
+            }, [activeCompany]);
+
+            useEffect(() => {
+                if (!activeCompany) return;
+                
+                if (pollingRef.current) {
+                    clearInterval(pollingRef.current);
+                }
+                
+                pollingRef.current = setInterval(() => {
+                    loadTenantData(true);
+                }, 2000);
+                
+                return () => {
+                    if (pollingRef.current) {
+                        clearInterval(pollingRef.current);
+                    }
+                };
+            }, [activeCompany, loadTenantData]);
+
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                const { username, password } = authForm;
+                if (!username || !password) return alert('Isi username & password!');
+
+                if (isSignUp) {
+                    const exists = await db.users.where('username').equals(username).first();
+                    if (exists) return alert('Username sudah terpakai!');
+                    await db.users.add({ username, password });
+                    alert('✅ Akun berhasil dibuat! Silakan login.');
+                    setIsSignUp(false);
+                } else {
+                    const found = await db.users.where({ username, password }).first();
+                    if (!found) return alert('Username atau password salah!');
+                    setUser(found);
+                    await loadCompanies(found.id);
+                }
+            };
+
+            const handleLogout = () => {
+                if (pollingRef.current) {
+                    clearInterval(pollingRef.current);
+                }
+                setUser(null);
+                setActiveCompany(null);
+                setCompanies([]);
+                localStorage.removeItem('kasirku_session_userId');
+                localStorage.removeItem('kasirku_session_companyId');
+            };
+
+            const handleAddCompany = async (e) => {
+                e.preventDefault();
+                if (!newCompany.name) return;
+                await db.companies.add({ userId: user.id, name: newCompany.name, type: newCompany.type });
+                setNewCompany({ name: '', type: 'Kuliner' });
+                await loadCompanies(user.id);
+            };
+
+            const getCOGS = (recipe) => {
+                if (!recipe?.length) return 0;
+                return recipe.reduce((acc, r) => {
+                    const s = stocks.find((x) => x.id === parseInt(r.stockId));
+                    return acc + (s ? s.price * (parseFloat(r.qty) || 0) : 0);
+                }, 0);
+            };
+
+            const totalRevenue = useMemo(() => txs.reduce((a, b) => a + b.total, 0), [txs]);
+            const totalCOGS = useMemo(() => txs.reduce((a, b) => a + (b.hppTotal || 0), 0), [txs]);
+            const grossProfit = totalRevenue - totalCOGS;
+            const totalOpex = useMemo(() => opexList.reduce((a, b) => a + b.amount, 0), [opexList]);
+            const netProfit = grossProfit - totalOpex;
+            const totalStockVal = useMemo(() => stocks.reduce((a, b) => a + b.qty * b.price, 0), [stocks]);
+
+            const runAI = () => {
+                setAiLoading(true);
+                setTimeout(() => {
+                    let score = 100;
+                    const diag = [];
+                    const recs = [];
+                    const margin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+                    const opexRatio = totalRevenue > 0 ? (totalOpex / totalRevenue) * 100 : 0;
+
+                    if (totalRevenue > 0 && margin < 30) {
+                        score -= 25;
+                        diag.push(`Margin Laba Kotor tipis (${margin.toFixed(1)}%). HPP terlalu tinggi.`);
+                        recs.push('Naikkan harga jual atau negosiasi harga bahan baku ke supplier.');
+                    }
+                    if (opexRatio > 35) {
+                        score -= 25;
+                        diag.push(`OPEX memakan ${opexRatio.toFixed(1)}% omset! Terlalu boros.`);
+                        recs.push('Evaluasi biaya listrik, gaji, atau sewa.');
+                    } else if (totalOpex === 0 && txs.length > 0) {
+                        score -= 10;
+                        diag.push('Belum ada data OPEX. Net Profit belum akurat.');
+                        recs.push('Catat semua pengeluaran rutin di tab Biaya OPEX.');
+                    }
+                    if (netProfit < 0 && totalRevenue > 0) {
+                        score -= 30;
+                        diag.push(`RUGI BERSIH Rp ${Math.abs(netProfit).toLocaleString('id-ID')}.`);
+                        recs.push('Fokus jual produk margin tinggi.');
+                    }
+
+                    const low = stocks.filter((s) => s.qty < 5);
+                    if (low.length > 0) {
+                        diag.push(`${low.length} bahan stok menipis (< 5 unit).`);
+                        recs.push(`Restock: ${low.map((s) => s.name).join(', ')}.`);
+                    }
+
+                    if (diag.length === 0) {
+                        diag.push('Performa keuangan sangat sehat!');
+                        recs.push('Pertimbangkan ekspansi atau tambah variasi produk.');
+                    }
+
+                    setAiResult({ score: Math.max(0, score), diag, recs });
+                    setAiLoading(false);
+                }, 700);
+            };
+
+            const checkout = async () => {
+                if (!cart.length || !activeCompany) return;
+                try {
+                    await db.transaction('rw', db.stocks, db.txs, async () => {
+                        for (const item of cart) {
+                            if (item.ingredients) {
+                                for (const ing of item.ingredients) {
+                                    const stk = await db.stocks.get(parseInt(ing.stockId));
+                                    const need = ing.qty * item.qty;
+                                    if (!stk || stk.qty < need) throw new Error(`Stok ${stk?.name || '?'} tidak cukup!`);
+                                    await db.stocks.update(stk.id, { qty: stk.qty - need });
+                                }
+                            }
+                        }
+
+                        const items = cart.map((c) => ({
+                            menuId: c.id,
+                            name: c.name,
+                            price: c.price,
+                            qty: c.qty,
+                            hpp: getCOGS(c.ingredients),
+                        }));
+
+                        const total = items.reduce((a, b) => a + b.price * b.qty, 0);
+                        const hppTotal = items.reduce((a, b) => a + b.hpp * b.qty, 0);
+
+                        await db.txs.add({
+                            companyId: activeCompany.id,
+                            createdAt: new Date().toISOString(),
+                            items,
+                            total,
+                            hppTotal,
+                        });
+
+                        setReceiptData({
+                            id: 'TRX-' + Date.now().toString(36).slice(-6).toUpperCase(),
+                            items,
+                            total,
+                            hppTotal,
+                            time: new Date().toISOString(),
+                        });
+                    });
+
+                    setCart([]);
+                    setModal('receipt');
+                    await loadTenantData(true);
+                } catch (err) {
+                    alert('❌ ' + (err.message || 'Gagal checkout.'));
+                }
+            };
+
+            const saveOpex = async () => {
+                if (!fOpex.name || !fOpex.amount || !activeCompany) return;
+                await db.opex.add({
+                    companyId: activeCompany.id,
+                    name: fOpex.name,
+                    category: fOpex.category,
+                    amount: parseFloat(fOpex.amount),
+                    createdAt: new Date().toISOString(),
+                });
+                setFOpex({ name: '', amount: '', category: 'Listrik / Air' });
+                setModal(null);
+                await loadTenantData(true);
+            };
+
+            const saveWaste = async () => {
+                if (!fWaste.stockId || !fWaste.qty || !activeCompany) return;
+                const stk = await db.stocks.get(parseInt(fWaste.stockId));
+                if (!stk) return alert('Bahan tidak ditemukan.');
+                const qty = parseFloat(fWaste.qty);
+                if (qty > stk.qty) return alert('Jumlah melebihi stok!');
+
+                await db.stocks.update(stk.id, { qty: stk.qty - qty });
+                setFWaste({ stockId: '', qty: '', note: '' });
+                setModal(null);
+                await loadTenantData(true);
+            };
+
+            const saveBahan = async () => {
+                if (!fBahan.name || !fBahan.price || !fBahan.qty || !activeCompany) return;
+                await db.stocks.add({
+                    companyId: activeCompany.id,
+                    name: fBahan.name,
+                    unit: fBahan.unit,
+                    price: parseFloat(fBahan.price),
+                    qty: parseFloat(fBahan.qty),
+                });
+                setFBahan({ name: '', unit: 'pcs', price: '', qty: '' });
+                setModal(null);
+                await loadTenantData(true);
+            };
+
+            const saveMenu = async () => {
+                if (!fMenu.name || !fMenu.price || !activeCompany) return;
+                const ingredients = fMenu.ingredients
+                    .filter((i) => i.stockId && i.qty)
+                    .map((i) => ({ stockId: i.stockId, qty: parseFloat(i.qty) }));
+
+                const payload = {
+                    name: fMenu.name,
+                    price: parseFloat(fMenu.price),
+                    icon: fMenu.icon || '📦',
+                    category: fMenu.category,
+                    ingredients,
+                };
+
+                if (editMenu) await db.menus.update(editMenu.id, payload);
+                else await db.menus.add({ companyId: activeCompany.id, ...payload });
+
+                setEditMenu(null);
+                setFMenu({
+                    name: '',
+                    price: '',
+                    icon: '📦',
+                    category: 'Makanan',
+                    ingredients: [{ stockId: '', qty: '' }],
+                });
+                setModal(null);
+                await loadTenantData(true);
+            };
+
+            const deleteMenu = async (id) => {
+                if (confirm('Hapus menu ini?')) {
+                    await db.menus.delete(id);
+                    await loadTenantData(true);
+                }
+            };
+
+            const deleteStock = async (id) => {
+                if (confirm('Hapus bahan ini?')) {
+                    await db.stocks.delete(id);
+                    await loadTenantData(true);
+                }
+            };
+
+            const deleteOpex = async (id) => {
+                if (confirm('Hapus catatan OPEX?')) {
+                    await db.opex.delete(id);
+                    await loadTenantData(true);
+                }
+            };
+
+            const addToCart = (menu) => {
+                setCart((prev) => {
+                    const ex = prev.find((c) => c.id === menu.id);
+                    return ex
+                        ? prev.map((c) => (c.id === menu.id ? { ...c, qty: c.qty + 1 } : c))
+                        : [...prev, { ...menu, qty: 1 }];
+                });
+            };
+
+            const removeFromCart = (id) => setCart((prev) => prev.filter((c) => c.id !== id));
+            const updateCart = (id, d) =>
+                setCart((prev) =>
+                    prev
+                        .map((c) => (c.id === id ? { ...c, qty: Math.max(0, c.qty + d) } : c))
+                        .filter((c) => c.qty > 0)
+                );
+
+            const cartTotal = cart.reduce((a, b) => a + b.price * b.qty, 0);
+            const cartCount = cart.reduce((a, b) => a + b.qty, 0);
+
+            const filteredMenus = activeCategory === 'Semua' ? menus : menus.filter((m) => m.category === activeCategory);
+
+            if (!user) {
+                return (
+                    <div className="app-shell items-center justify-center p-6 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
+                        <div className="w-full max-w-sm text-center space-y-6">
+                            <div>
+                                <div className="text-6xl mb-4">🏬</div>
+                                <h1 className="text-4xl font-black text-white tracking-tight">KasirKu</h1>
+                                <p className="text-sm font-semibold text-indigo-300 mt-2 opacity-80">AI-Powered Multi-Tenant POS</p>
+                            </div>
+                            <form onSubmit={handleAuth} className="bg-white/5 backdrop-blur-xl p-7 rounded-3xl border border-white/10 space-y-4 shadow-2xl">
+                                <h2 className="font-bold text-white text-lg tracking-tight">{isSignUp ? '✨ Buat Akun Baru' : '🔐 Masuk ke Akun'}</h2>
+                                <input type="text" value={authForm.username} onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })} placeholder="Username" className="w-full p-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40 font-semibold text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 transition-all" />
+                                <input type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} placeholder="Password" className="w-full p-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40 font-semibold text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 transition-all" />
+                                <button type="submit" className="w-full py-3.5 bg-indigo-600 text-white font-extrabold rounded-xl text-sm hover:bg-indigo-500 transition-all hover:shadow-lg hover:shadow-indigo-500/25 active:scale-[0.98]">
+                                    {isSignUp ? '🚀 Daftar Sekarang' : '🔓 Masuk'}
+                                </button>
+                            </form>
+                            <button onClick={() => setIsSignUp(!isSignUp)} className="text-indigo-300 font-semibold text-sm hover:text-white transition-colors">
+                                {isSignUp ? '← Sudah punya akun? Masuk' : 'Buat akun baru →'}
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="app-shell">
+                    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <span className="text-2xl">🏬</span>
+                            <div>
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Bisnis Aktif</span>
+                                {companies.length > 0 ? (
+                                    <select
+                                        value={activeCompany?.id || ''}
+                                        onChange={(e) => setActiveCompany(companies.find((c) => c.id === parseInt(e.target.value)))}
+                                        className="font-extrabold text-sm bg-slate-50 text-indigo-700 rounded-lg px-2 py-1.5 outline-none border border-slate-200 max-w-[220px] cursor-pointer hover:border-indigo-300 transition-colors"
+                                    >
+                                        {companies.map((c) => (
+                                            <option key={c.id} value={c.id}>{c.name} • {c.type}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <span className="font-extrabold text-sm text-slate-400">Belum ada bisnis</span>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {liveUpdateCount > 0 && (
+                                <span className="live-indicator text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                    LIVE
+                                </span>
+                            )}
+                            {cartCount > 0 && tab === 'kasir' && (
+                                <span className="bg-indigo-100 text-indigo-700 font-extrabold text-xs px-3 py-1.5 rounded-full flex items-center gap-1 pulse-dot">
+                                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                    🛒 {cartCount}
+                                </span>
+                            )}
+                            <button onClick={handleLogout} className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all">
+                                Keluar
+                            </button>
+                        </div>
+                    </header>
+
+                    {!activeCompany ? (
+                        <div className="flex-1 flex items-center justify-center p-6 bg-slate-50">
+                            <form onSubmit={handleAddCompany} className="w-full max-w-md bg-white p-7 rounded-3xl shadow-xl border space-y-5">
+                                <div>
+                                    <h3 className="font-extrabold text-xl text-slate-800">➕ Buat Usaha Baru</h3>
+                                    <p className="text-xs text-slate-400 font-medium mt-1">Langkah pertama menuju manajemen bisnis yang lebih baik</p>
+                                </div>
+                                <input type="text" value={newCompany.name} onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })} placeholder="Nama usaha, misal: Warung Sate Madura" className="w-full p-3.5 border-2 border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-indigo-400 transition-colors" />
+                                <select value={newCompany.type} onChange={(e) => setNewCompany({ ...newCompany, type: e.target.value })} className="w-full p-3.5 border-2 border-slate-200 rounded-xl text-sm font-bold bg-white cursor-pointer outline-none focus:border-indigo-400 transition-colors">
+                                    <option value="Kuliner">🍽️ Kuliner / F&B</option>
+                                    <option value="Otomotif">🔧 Otomotif / Jasa</option>
+                                    <option value="Ritel">🛍️ Ritel / Toko</option>
+                                </select>
+                                <button type="submit" className="w-full py-3.5 bg-indigo-600 text-white font-extrabold rounded-xl text-sm hover:bg-indigo-500 transition-all hover:shadow-lg hover:shadow-indigo-500/25 active:scale-[0.98]">
+                                    🚀 Mulai Usaha
+                                </button>
+                            </form>
+                        </div>
+                    ) : (
+                        <>
+                            <main className="flex-1 overflow-y-auto content-scroll pb-20">
+                                <div className="p-4">
+                                {tab === 'kasir' && (
+                                    <div>
+                                        <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
+                                            {['Semua', 'Makanan', 'Minuman', 'Dessert'].map((cat) => {
+                                                const filtered = cat === 'Semua' ? menus : menus.filter((m) => m.category === cat);
+                                                const isActive = activeCategory === cat;
+                                                return (
+                                                    <button
+                                                        key={cat}
+                                                        onClick={() => setActiveCategory(cat)}
+                                                        className={`px-4 py-2.5 text-xs font-extrabold rounded-xl whitespace-nowrap tap transition-all border-2 ${
+                                                            isActive 
+                                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200' 
+                                                                : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+                                                        }`}
+                                                    >
+                                                        {cat} <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? 'bg-white/20' : 'bg-slate-100'}`}>{filtered.length}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {filteredMenus.length === 0 ? (
+                                            <div className="text-center py-16">
+                                                <div className="text-5xl mb-4">📋</div>
+                                                <p className="font-bold text-slate-500 text-sm">Belum ada menu di kategori ini</p>
+                                                <button onClick={() => { setEditMenu(null); setFMenu({ name: '', price: '', icon: '📦', category: activeCategory === 'Semua' ? 'Makanan' : activeCategory, ingredients: [{ stockId: '', qty: '' }] }); setModal('menu'); }} className="mt-4 px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs tap hover:bg-indigo-500 transition-all">
+                                                    + Tambah Menu
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="menu-grid grid gap-3 mb-4">
+                                                {filteredMenus.map((m) => (
+                                                    <div key={m.id} onClick={() => addToCart(m)} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm tap card-hover flex flex-col gap-2 transition-all">
+                                                        <div className="flex justify-between items-start">
+                                                            <span className="text-3xl">{m.icon || '📦'}</span>
+                                                            <span className="text-[9px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">
+                                                                HPP {getCOGS(m.ingredients).toLocaleString('id-ID')}
+                                                            </span>
+                                                        </div>
+                                                        <div className="font-extrabold text-slate-800 text-sm leading-tight">{m.name}</div>
+                                                        <div className="text-indigo-600 font-black text-sm">Rp {m.price.toLocaleString('id-ID')}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {cart.length > 0 && (
+                                            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-lg space-y-3 mb-4">
+                                                <div className="flex justify-between items-center">
+                                                    <h3 className="font-extrabold text-sm text-slate-500 uppercase tracking-wide">🛒 Keranjang • {cartCount} item</h3>
+                                                    <button onClick={() => setCart([])} className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-100 transition-all">Kosongkan</button>
+                                                </div>
+                                                <div className="max-h-48 overflow-y-auto space-y-1">
+                                                    {cart.map((c) => (
+                                                        <div key={c.id} className="flex justify-between items-center text-sm py-2.5 px-2 border-b border-slate-50 rounded-lg hover:bg-slate-50 transition-colors">
+                                                            <div className="flex-1">
+                                                                <span className="font-bold text-slate-700">{c.name}</span>
+                                                                <span className="text-slate-400 ml-2 text-xs">Rp {(c.price * c.qty).toLocaleString('id-ID')}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <button onClick={() => updateCart(c.id, -1)} className="w-7 h-7 bg-slate-100 rounded-lg font-black text-slate-600 hover:bg-slate-200 transition-all tap">−</button>
+                                                                <span className="font-extrabold w-6 text-center text-slate-800">{c.qty}</span>
+                                                                <button onClick={() => updateCart(c.id, 1)} className="w-7 h-7 bg-slate-100 rounded-lg font-black text-slate-600 hover:bg-slate-200 transition-all tap">+</button>
+                                                                <button onClick={() => removeFromCart(c.id)} className="ml-1 text-red-400 font-bold hover:text-red-600 transition-colors">✕</button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <button onClick={() => setModal('checkout')} className="w-full py-3.5 bg-indigo-600 text-white font-extrabold rounded-xl text-sm mt-2 tap hover:bg-indigo-500 hover:shadow-lg hover:shadow-indigo-500/25 transition-all">
+                                                    💳 Bayar • Rp {cartTotal.toLocaleString('id-ID')}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {tab === 'biaya' && (
+                                    <div className="space-y-4">
+                                        <div className="bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-2xl p-6 flex justify-between items-center shadow-lg shadow-orange-500/20">
+                                            <div>
+                                                <div className="text-xs font-bold uppercase opacity-80 tracking-wide">Total Biaya Operasional</div>
+                                                <div className="text-3xl font-black mt-1">Rp {totalOpex.toLocaleString('id-ID')}</div>
+                                            </div>
+                                            <button onClick={() => setModal('opex')} className="px-5 py-3 bg-white text-amber-700 font-extrabold text-xs rounded-xl tap hover:shadow-md transition-all">
+                                                + Biaya
+                                            </button>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <h3 className="font-extrabold text-sm text-slate-700 uppercase tracking-wide">📋 Rincian Biaya Variabel</h3>
+                                            {opexList.length === 0 && (
+                                                <div className="text-center py-10 bg-white rounded-2xl border border-slate-100">
+                                                    <div className="text-4xl mb-2">📊</div>
+                                                    <p className="text-sm text-slate-400 italic font-medium">Belum ada data pengeluaran</p>
+                                                </div>
+                                            )}
+                                            {opexList.map((o) => (
+                                                <div key={o.id} className="p-3.5 bg-white border border-slate-200 rounded-xl flex justify-between items-center text-sm hover:shadow-sm transition-all">
+                                                    <div>
+                                                        <div className="font-extrabold text-slate-800">{o.name}</div>
+                                                        <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200 font-bold">{o.category}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-black text-red-600">-Rp {o.amount.toLocaleString('id-ID')}</span>
+                                                        <button onClick={() => deleteOpex(o.id)} className="text-red-400 font-bold hover:text-red-600 transition-colors text-xs">✕</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {tab === 'gudang' && (
+                                    <div className="space-y-4">
+                                        <div className="flex flex-wrap justify-between items-center gap-2">
+                                            <h3 className="font-extrabold text-sm text-slate-700 uppercase tracking-wide">📦 Stok Gudang</h3>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setModal('bahan')} className="px-4 py-2.5 bg-indigo-600 text-white font-extrabold text-xs rounded-xl tap hover:bg-indigo-500 transition-all">+ Bahan</button>
+                                                <button onClick={() => setModal('waste')} className="px-4 py-2.5 bg-red-500 text-white font-extrabold text-xs rounded-xl tap hover:bg-red-600 transition-all">🗑️ Waste</button>
+                                            </div>
+                                        </div>
+                                        <div className="bg-indigo-50 p-5 rounded-2xl text-center border border-indigo-100">
+                                            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wide">Total Nilai Asset</span>
+                                            <div className="text-2xl font-black text-indigo-700 mt-1">Rp {totalStockVal.toLocaleString('id-ID')}</div>
+                                        </div>
+                                        {stocks.length === 0 ? (
+                                            <div className="text-center py-10 bg-white rounded-2xl border border-slate-100">
+                                                <div className="text-4xl mb-2">📭</div>
+                                                <p className="text-sm text-slate-400 italic font-medium">Gudang kosong, tambahkan bahan</p>
+                                            </div>
+                                        ) : (
+                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                {stocks.map((s) => (
+                                                    <div key={s.id} className="p-3.5 bg-white border border-slate-200 rounded-xl flex justify-between items-center text-sm hover:shadow-sm transition-all">
+                                                        <div>
+                                                            <div className="font-extrabold text-slate-800">{s.name}</div>
+                                                            <div className="text-slate-400 text-xs">Rp {s.price.toLocaleString('id-ID')} / {s.unit}</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`font-black text-sm px-2 py-1 rounded-lg ${
+                                                                s.qty <= 0 ? 'bg-red-50 text-red-600' : 
+                                                                s.qty <= 3 ? 'bg-amber-50 text-amber-600' : 
+                                                                'bg-emerald-50 text-emerald-600'
+                                                            }`}>
+                                                                {s.qty.toFixed(1)} {s.unit}
+                                                            </span>
+                                                            <button onClick={() => deleteStock(s.id)} className="text-red-400 text-xs font-bold hover:text-red-600 transition-colors">✕</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {tab === 'ai' && (
+                                    <div className="space-y-4">
+                                        <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-3 shadow-xl">
+                                            <h3 className="font-extrabold text-sm text-slate-400 uppercase tracking-wide text-center mb-3">📊 Ringkasan Keuangan</h3>
+                                            {[
+                                                ['Omset', totalRevenue, 'emerald'],
+                                                ['HPP', totalCOGS, 'amber'],
+                                                ['Laba Kotor', grossProfit, 'blue'],
+                                                ['OPEX', totalOpex, 'red'],
+                                                ['Laba Bersih', netProfit, netProfit >= 0 ? 'emerald' : 'red'],
+                                            ].map(([label, val, color]) => (
+                                                <div key={label} className="flex justify-between items-center py-2 px-3 border-b border-slate-800 last:border-0 text-sm hover:bg-slate-800/50 rounded-lg transition-colors">
+                                                    <span className="font-bold text-slate-400">{label}</span>
+                                                    <span className={`font-black text-${color}-400`}>Rp {val.toLocaleString('id-ID')}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button onClick={runAI} disabled={aiLoading} className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-extrabold rounded-2xl text-sm tap disabled:opacity-60 hover:shadow-lg hover:shadow-purple-500/25 transition-all gradient-shimmer">
+                                            {aiLoading ? '🔄 Menganalisis Data...' : '🤖 Jalankan AI Diagnostic'}
+                                        </button>
+                                        {aiResult && (
+                                            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6 space-y-4 shadow-lg">
+                                                <div className="flex justify-between items-center">
+                                                    <div>
+                                                        <h4 className="font-black text-purple-900 text-lg">AI Health Score</h4>
+                                                        <p className="text-xs text-purple-600 font-bold">{activeCompany.name}</p>
+                                                    </div>
+                                                    <span className={`text-3xl font-black px-5 py-2 rounded-2xl ${
+                                                        aiResult.score >= 80 ? 'bg-emerald-100 text-emerald-700' :
+                                                        aiResult.score >= 50 ? 'bg-amber-100 text-amber-700' :
+                                                        'bg-red-100 text-red-700'
+                                                    }`}>{aiResult.score}%</span>
+                                                </div>
+                                                <div>
+                                                    <h5 className="text-xs font-extrabold text-purple-900 uppercase mb-2">🔍 Diagnosa</h5>
+                                                    {aiResult.diag.map((d, i) => <p key={i} className="text-sm font-semibold text-purple-800 py-1">• {d}</p>)}
+                                                </div>
+                                                <div className="border-t border-purple-200 pt-3">
+                                                    <h5 className="text-xs font-extrabold text-indigo-900 uppercase mb-2">💡 Rekomendasi</h5>
+                                                    {aiResult.recs.map((r, i) => <p key={i} className="text-sm bg-white p-3 rounded-xl border border-purple-100 mb-2 font-medium">{r}</p>)}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {tab === 'pengaturan' && (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <h3 className="font-extrabold text-sm text-slate-700 uppercase tracking-wide">🍽️ Master Menu</h3>
+                                            <button onClick={() => { setEditMenu(null); setFMenu({ name: '', price: '', icon: '📦', category: 'Makanan', ingredients: [{ stockId: '', qty: '' }] }); setModal('menu'); }} className="px-4 py-2.5 bg-indigo-600 text-white font-extrabold text-xs rounded-xl tap hover:bg-indigo-500 transition-all">
+                                                + Menu
+                                            </button>
+                                        </div>
+                                        {menus.length === 0 ? (
+                                            <div className="text-center py-10 bg-white rounded-2xl border border-slate-100">
+                                                <div className="text-4xl mb-2">📋</div>
+                                                <p className="text-sm text-slate-400 italic font-medium">Belum ada menu, tambahkan sekarang</p>
+                                            </div>
+                                        ) : (
+                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                {menus.map((m) => (
+                                                    <div key={m.id} className="p-3.5 bg-white border border-slate-200 rounded-xl flex justify-between items-center text-sm hover:shadow-sm transition-all">
+                                                        <div>
+                                                            <span className="font-extrabold text-slate-800">{m.icon} {m.name}</span>
+                                                            <div className="text-slate-400 text-xs mt-0.5">Rp {m.price.toLocaleString('id-ID')} • {m.ingredients?.length || 0} bahan</div>
+                                                        </div>
+                                                        <div className="flex gap-1">
+                                                            <button onClick={() => { setEditMenu(m); setFMenu({ name: m.name, price: String(m.price), icon: m.icon, category: m.category || 'Makanan', ingredients: m.ingredients?.length ? m.ingredients.map((i) => ({ stockId: String(i.stockId), qty: String(i.qty) })) : [{ stockId: '', qty: '' }] }); setModal('menu'); }} className="text-xs bg-amber-100 text-amber-700 px-2.5 py-1.5 rounded-lg font-bold hover:bg-amber-200 transition-all">✏️</button>
+                                                            <button onClick={() => deleteMenu(m.id)} className="text-xs bg-red-100 text-red-600 px-2.5 py-1.5 rounded-lg font-bold hover:bg-red-200 transition-all">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {tab === 'riwayat' && (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <h3 className="font-extrabold text-sm text-slate-700 uppercase tracking-wide">📜 Riwayat Transaksi</h3>
+                                            {txs.length > 0 && (
+                                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200 flex items-center gap-1 live-indicator">
+                                                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                                    Real-time
+                                                </span>
+                                            )}
+                                        </div>
+                                        {txs.length === 0 ? (
+                                            <div className="text-center py-10 bg-white rounded-2xl border border-slate-100">
+                                                <div className="text-4xl mb-2">📭</div>
+                                                <p className="text-sm text-slate-400 italic font-medium">Menunggu transaksi pertama...</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {txs.map((t, idx) => (
+                                                    <div 
+                                                        key={t.id || idx} 
+                                                        onClick={() => setReceiptData({ ...t, id: t.id || `TRX-${idx + 1}` })} 
+                                                        className={`p-4 bg-white border border-slate-200 rounded-2xl flex justify-between items-center tap card-hover text-sm transition-all ${
+                                                            newTxIds.has(t.id) ? 'new-tx-highlight border-emerald-300 shadow-lg shadow-emerald-100' : ''
+                                                        }`}
+                                                    >
+                                                        <div>
+                                                            <div className="font-black text-slate-800 flex items-center gap-2">
+                                                                {t.id || 'TRX-' + idx}
+                                                                {newTxIds.has(t.id) && (
+                                                                    <span className="text-[9px] bg-emerald-500 text-white px-1.5 py-0.5 rounded-full font-bold animate-pulse">NEW</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-xs text-slate-400 mt-0.5">{new Date(t.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="font-black text-indigo-600">Rp {t.total.toLocaleString('id-ID')}</div>
+                                                            <div className="text-xs text-emerald-600 font-bold mt-0.5">Laba: Rp {(t.total - (t.hppTotal || 0)).toLocaleString('id-ID')}</div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                </div>
+                            </main>
+                        </>
+                    )}
+
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex justify-around py-2 z-20 shadow-2xl">
+                        {[
+                            { id: 'kasir', label: 'Kasir', icon: '🛒' },
+                            { id: 'biaya', label: 'OPEX', icon: '⚡' },
+                            { id: 'gudang', label: 'Gudang', icon: '📦' },
+                            { id: 'ai', label: 'AI', icon: '🤖' },
+                            { id: 'riwayat', label: 'Riwayat', icon: '📜' },
+                            { id: 'pengaturan', label: 'Menu', icon: '⚙️' },
+                        ].map((t) => (
+                            <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-col items-center gap-0.5 text-[10px] font-bold px-3 py-1.5 rounded-xl transition-all tap ${
+                                tab === t.id 
+                                    ? 'text-indigo-600 bg-indigo-50 shadow-sm' 
+                                    : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                            }`}>
+                                <span className="text-lg leading-none">{t.icon}</span>
+                                {t.label}
+                            </button>
+                        ))}
+                    </nav>
+
+                    {modal === 'checkout' && (
+                        <div className="modal-overlay" onClick={() => setModal(null)}>
+                            <div className="modal-sheet p-6" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-extrabold text-lg">✅ Konfirmasi Pembayaran</h3>
+                                    <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                </div>
+                                <div className="text-center mb-4">
+                                    <div className="text-sm text-slate-500 font-bold">Total Pembayaran</div>
+                                    <div className="text-3xl font-black text-indigo-600">Rp {cartTotal.toLocaleString('id-ID')}</div>
+                                </div>
+                                <div className="space-y-1 mb-4 max-h-48 overflow-y-auto text-sm bg-slate-50 rounded-xl p-3">
+                                    {cart.map((c) => (
+                                        <div key={c.id} className="flex justify-between border-b border-slate-200 py-2 last:border-0">
+                                            <span className="font-bold">{c.name} <span className="text-slate-400">×{c.qty}</span></span>
+                                            <span className="font-bold">Rp {(c.price * c.qty).toLocaleString('id-ID')}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={() => setModal(null)} className="flex-1 py-3.5 border-2 font-bold rounded-xl text-sm hover:bg-slate-50 transition-all">Batal</button>
+                                    <button onClick={checkout} className="flex-1 py-3.5 bg-indigo-600 text-white font-bold rounded-xl text-sm hover:bg-indigo-500 hover:shadow-lg transition-all tap">Proses & Potong Stok</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {modal === 'receipt' && receiptData && (
+                        <div className="modal-overlay" onClick={() => { setModal(null); setReceiptData(null); }}>
+                            <div className="bg-white w-full max-w-sm mx-4 p-6 rounded-3xl shadow-2xl text-center space-y-4" onClick={(e) => e.stopPropagation()}>
+                                <div className="text-5xl">🧾</div>
+                                <div>
+                                    <div className="font-black text-lg">{receiptData.id}</div>
+                                    <div className="text-xs text-slate-400">{new Date(receiptData.time).toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'medium' })}</div>
+                                </div>
+                                <div className="border-t border-b border-dashed py-3 text-left text-sm space-y-2">
+                                    {receiptData.items?.map((it, i) => (
+                                        <div key={i} className="flex justify-between">
+                                            <span className="font-bold">{it.qty}× {it.name}</span>
+                                            <span className="font-bold">Rp {(it.price * it.qty).toLocaleString('id-ID')}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex justify-between font-black text-xl">
+                                    <span>Total</span>
+                                    <span className="text-indigo-600">Rp {receiptData.total?.toLocaleString('id-ID')}</span>
+                                </div>
+                                <button onClick={() => { setModal(null); setReceiptData(null); }} className="w-full py-3 bg-slate-800 text-white font-extrabold rounded-xl text-sm hover:bg-slate-700 transition-all tap">Tutup</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {modal === 'opex' && (
+                        <div className="modal-overlay" onClick={() => setModal(null)}>
+                            <div className="modal-sheet p-6" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-extrabold text-lg">💸 Catat Biaya OPEX</h3>
+                                    <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                </div>
+                                <input type="text" value={fOpex.name} onChange={(e) => setFOpex({ ...fOpex, name: e.target.value })} placeholder="Keterangan, misal: Bayar Listrik Bulanan" className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-3 outline-none focus:border-amber-400 transition-colors" />
+                                <select value={fOpex.category} onChange={(e) => setFOpex({ ...fOpex, category: e.target.value })} className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-3 bg-white cursor-pointer outline-none focus:border-amber-400 transition-colors">
+                                    {['Listrik / Air', 'Gaji', 'Sewa', 'Internet', 'Transport', 'Lainnya'].map((c) => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" value={fOpex.amount} onChange={(e) => setFOpex({ ...fOpex, amount: e.target.value })} placeholder="Nominal (Rp)" className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-4 outline-none focus:border-amber-400 transition-colors" />
+                                <div className="flex gap-3">
+                                    <button onClick={() => setModal(null)} className="flex-1 py-3.5 border-2 font-bold rounded-xl text-sm hover:bg-slate-50 transition-all">Batal</button>
+                                    <button onClick={saveOpex} className="flex-1 py-3.5 bg-amber-600 text-white font-bold rounded-xl text-sm hover:bg-amber-500 hover:shadow-lg transition-all tap">Simpan</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {modal === 'waste' && (
+                        <div className="modal-overlay" onClick={() => setModal(null)}>
+                            <div className="modal-sheet p-6" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-extrabold text-lg">🗑️ Catat Waste</h3>
+                                    <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                </div>
+                                <select value={fWaste.stockId} onChange={(e) => setFWaste({ ...fWaste, stockId: e.target.value })} className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-3 bg-white cursor-pointer outline-none focus:border-red-400 transition-colors">
+                                    <option value="">-- Pilih Bahan --</option>
+                                    {stocks.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.qty.toFixed(1)} {s.unit})</option>)}
+                                </select>
+                                <input type="number" value={fWaste.qty} onChange={(e) => setFWaste({ ...fWaste, qty: e.target.value })} placeholder="Jumlah yang terbuang" className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-3 outline-none focus:border-red-400 transition-colors" />
+                                <input type="text" value={fWaste.note} onChange={(e) => setFWaste({ ...fWaste, note: e.target.value })} placeholder="Alasan, misal: Kadaluarsa" className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-4 outline-none focus:border-red-400 transition-colors" />
+                                <div className="flex gap-3">
+                                    <button onClick={() => setModal(null)} className="flex-1 py-3.5 border-2 font-bold rounded-xl text-sm hover:bg-slate-50 transition-all">Batal</button>
+                                    <button onClick={saveWaste} className="flex-1 py-3.5 bg-red-500 text-white font-bold rounded-xl text-sm hover:bg-red-600 hover:shadow-lg transition-all tap">Simpan Waste</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {modal === 'bahan' && (
+                        <div className="modal-overlay" onClick={() => setModal(null)}>
+                            <div className="modal-sheet p-6" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-extrabold text-lg">📦 Tambah Bahan Baku</h3>
+                                    <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                </div>
+                                <input type="text" value={fBahan.name} onChange={(e) => setFBahan({ ...fBahan, name: e.target.value })} placeholder="Nama bahan, misal: Tepung Terigu" className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-3 outline-none focus:border-indigo-400 transition-colors" />
+                                <div className="grid grid-cols-2 gap-3 mb-3">
+                                    <input type="text" value={fBahan.unit} onChange={(e) => setFBahan({ ...fBahan, unit: e.target.value })} placeholder="Satuan (pcs, kg, ltr)" className="p-3.5 border-2 rounded-xl text-sm font-bold outline-none focus:border-indigo-400 transition-colors" />
+                                    <input type="number" value={fBahan.qty} onChange={(e) => setFBahan({ ...fBahan, qty: e.target.value })} placeholder="Stok awal" className="p-3.5 border-2 rounded-xl text-sm font-bold outline-none focus:border-indigo-400 transition-colors" />
+                                </div>
+                                <input type="number" value={fBahan.price} onChange={(e) => setFBahan({ ...fBahan, price: e.target.value })} placeholder="Harga per satuan (Rp)" className="w-full p-3.5 border-2 rounded-xl text-sm font-bold mb-4 outline-none focus:border-indigo-400 transition-colors" />
+                                <div className="flex gap-3">
+                                    <button onClick={() => setModal(null)} className="flex-1 py-3.5 border-2 font-bold rounded-xl text-sm hover:bg-slate-50 transition-all">Batal</button>
+                                    <button onClick={saveBahan} className="flex-1 py-3.5 bg-indigo-600 text-white font-bold rounded-xl text-sm hover:bg-indigo-500 hover:shadow-lg transition-all tap">Simpan</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {modal === 'menu' && (
+                        <div className="modal-overlay" onClick={() => { setModal(null); setEditMenu(null); }}>
+                            <div className="modal-sheet p-6 max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-extrabold text-lg">{editMenu ? '✏️ Edit Menu' : '➕ Tambah Menu Baru'}</h3>
+                                    <button onClick={() => { setModal(null); setEditMenu(null); }} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 mb-3">
+                                    <input type="text" value={fMenu.name} onChange={(e) => setFMenu({ ...fMenu, name: e.target.value })} placeholder="Nama menu" className="col-span-2 p-3.5 border-2 rounded-xl text-sm font-bold outline-none focus:border-indigo-400 transition-colors" />
+                                    <input type="text" value={fMenu.icon} onChange={(e) => setFMenu({ ...fMenu, icon: e.target.value })} placeholder="🍕" className="p-3.5 border-2 rounded-xl text-sm text-center outline-none focus:border-indigo-400 transition-colors" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 mb-3">
+                                    <select value={fMenu.category} onChange={(e) => setFMenu({ ...fMenu, category: e.target.value })} className="p-3.5 border-2 rounded-xl text-sm font-bold bg-white cursor-pointer outline-none focus:border-indigo-400 transition-colors">
+                                        {['Makanan', 'Minuman', 'Dessert'].map((c) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <input type="number" value={fMenu.price} onChange={(e) => setFMenu({ ...fMenu, price: e.target.value })} placeholder="Harga jual" className="p-3.5 border-2 rounded-xl text-sm font-bold outline-none focus:border-indigo-400 transition-colors" />
+                                </div>
+                                <div className="border-t pt-4 space-y-2 mb-4">
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-bold text-sm">📋 Resep / Bahan</span>
+                                        <button onClick={() => setFMenu({ ...fMenu, ingredients: [...fMenu.ingredients, { stockId: '', qty: '' }] })} className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-all">+ Bahan</button>
+                                    </div>
+                                    {fMenu.ingredients.map((ing, i) => (
+                                        <div key={i} className="flex gap-2 items-center">
+                                            <select value={ing.stockId} onChange={(e) => {
+                                                const n = [...fMenu.ingredients];
+                                                n[i].stockId = e.target.value;
+                                                setFMenu({ ...fMenu, ingredients: n });
+                                            }} className="flex-1 p-3 border-2 rounded-xl text-xs bg-white cursor-pointer outline-none focus:border-indigo-400 transition-colors">
+                                                <option value="">-- Pilih Bahan --</option>
+                                                {stocks.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.unit})</option>)}
+                                            </select>
+                                            <input type="number" step="0.001" value={ing.qty} onChange={(e) => {
+                                                const n = [...fMenu.ingredients];
+                                                n[i].qty = e.target.value;
+                                                setFMenu({ ...fMenu, ingredients: n });
+                                            }} placeholder="Qty" className="w-24 p-3 border-2 rounded-xl text-xs outline-none focus:border-indigo-400 transition-colors" />
+                                            {fMenu.ingredients.length > 1 && (
+                                                <button onClick={() => setFMenu({ ...fMenu, ingredients: fMenu.ingredients.filter((_, j) => j !== i) })} className="text-red-400 font-bold hover:text-red-600 transition-colors px-1">✕</button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={() => { setModal(null); setEditMenu(null); }} className="flex-1 py-3.5 border-2 font-bold rounded-xl text-sm hover:bg-slate-50 transition-all">Batal</button>
+                                    <button onClick={saveMenu} className="flex-1 py-3.5 bg-indigo-600 text-white font-bold rounded-xl text-sm hover:bg-indigo-500 hover:shadow-lg transition-all tap">{editMenu ? 'Perbarui' : 'Simpan Menu'}</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>            justify-content: center;
         }
 
         .app-shell {
