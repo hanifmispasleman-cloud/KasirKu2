@@ -79,6 +79,55 @@
         ];
 
         // ─── Utility Functions ───────────────────────────────
+        const formatCurrency = (amount) => `Rp ${(amount || 0).toLocaleString('id-ID')}`;
+        const getDefaultMenuForm = (category = 'Makanan') => ({
+            name: '', price: '', icon: '📦', category,
+            ingredients:
+        @keyframes slideInRight{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+        .card-hover:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(0,0,0,.08);border-color:#818cf8}
+        .pulse-dot{animation:pulse 2s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+        .gradient-shimmer{background:linear-gradient(90deg,#667eea 0%,#764ba2 100%);background-size:200% 200%;animation:shimmer 3s ease infinite}
+        @keyframes shimmer{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+        .new-tx-highlight{animation:slideInRight .5s cubic-bezier(.16,1,.3,1),highlightFade 2s ease-in-out}
+        @keyframes highlightFade{0%{background-color:#dbeafe}100%{background-color:transparent}}
+        .live-indicator{animation:livePulse 1.5s infinite}
+        @keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(.95)}}
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback, useRef, memo } = React;
+
+        // ─── Database Setup ──────────────────────────────────
+        const DB_NAME = 'kasirku_v10';
+        const db = new Dexie(DB_NAME);
+        
+        db.version(1).stores({
+            users: '++id, username',
+            companies: '++id, userId',
+            menus: '++id, companyId, category',
+            stocks: '++id, companyId',
+            txs: '++id, companyId, createdAt',
+            opex: '++id, companyId, createdAt',
+            waste: '++id, companyId, createdAt',
+        });
+
+        // ─── Constants ───────────────────────────────────────
+        const CATEGORIES = ['Semua', 'Makanan', 'Minuman', 'Dessert'];
+        const OPEX_CATEGORIES = ['Listrik / Air', 'Gaji', 'Sewa', 'Internet', 'Transport', 'Lainnya'];
+        const NAV_ITEMS = [
+            { id: 'kasir', label: 'Kasir', icon: '🛒' },
+            { id: 'biaya', label: 'OPEX', icon: '⚡' },
+            { id: 'gudang', label: 'Gudang', icon: '📦' },
+            { id: 'ai', label: 'AI', icon: '🤖' },
+            { id: 'riwayat', label: 'Riwayat', icon: '📜' },
+            { id: 'pengaturan', label: 'Menu', icon: '⚙️' },
+        ];
+
+        // ─── Utility Functions ───────────────────────────────
         const formatCurrency = (amount) => `Rp ${amount.toLocaleString('id-ID')}`;
         const getDefaultMenuForm = (category = 'Makanan') => ({
             name: '', price: '', icon: '📦', category,
