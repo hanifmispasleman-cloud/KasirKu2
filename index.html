@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KasirKu Master - AI & Variable Cost Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        html, body { background-color: #0f172a; margin: 0; padding: 0; min-height: 100vh; display: flex; justify-content: center; }
+        .app-container { width: 100%; max-width: 480px; min-height: 100vh; background: #ffffff; position: relative; display: flex; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <div id="root" class="w-full flex justify-center"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // DB Schema dengan Multitenant + Variable Cost (OPEX)
+        const db = new Dexie('kasirku_multitenant_ai_v2');
+        db.version(1).stores({
+            users: '++id, username',
+            companies: '++id, userId',
+            menus: '++id, companyId, category',
+            stocks: '++id, companyId',
+            txs: '++id, companyId, createdAt',
+            opex: '++id, companyId, category, createdAt'
+        });
+
+        function App() {
+            // Auth & Multi-tenant State
+            const [currentUser, setCurrentUser] = useState(null);
+            const [companies, setCompanies] = useState([]);
+            const [activeCompany, setActiveCompany] = useState(null);
+            const [isSignUp, setIsSignUp] = useState(false);
+            const [authUsername, setAuthUsername] = useState('');
+            const [authPassword, setAuthPassword] = useState('');
+            const [newCompName, setNewCompName] = useState('');
+            const [newCompType, setNewCompType] = useState('Kuliner');
+
+            // App Main State
+            const [tab, setTab] = useState('kasir');
+            const [menus, setMenus] = useState([]);
+            const [stocks, setStocks] = useState([]);
+            const [txs, setTxs] = useState([]);
+            const [opexList, setOpexList] = useState([]);
+            const [cart, setCart] = useState([]);
+
+            // AI State
+            const [aiAnalysis, setAiAnalysis] = useState(null);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+            // Modals
+            const [checkoutModal, setCheckoutModal] = useState(false);
+            const [opexModal, setOpexModal] = useState(false);
+            const [menuModal, setMenuModal] = useState(false);
+            const [bahanModal, setBahanModal] = useState(false);
+
+            // Forms
+            const [formOpex, setFormOpex] = useState({ name: '', amount: '', category: 'Listrik / Air' });
+            const [formBahan, setFormBahan] = useState({ name: '', unit: 'pcs', price: '', qty: '' });
+            const [formMenu, setFormMenu] = useState({ name: '', price: '', icon: '📦', ingredients: [{ stockId: '', qty: '' }] });
+
+            // Auth Handlers
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                if(!authUsername || !authPassword) return alert("Isi username & password!");
+
+                if(isSignUp) {
+                    const exist = await db.users.where('username').equals(authUsername).first();
+                    if(exist) return alert("Username sudah terpakai!");
+                    await db.users.add({ username: authUsername, password: authPassword });
+                    alert("Akun berhasil dibuat! Silakan Login.");
+                    setIsSignUp(false);
+                } else {
+                    const user = await db.users.where({ username: authUsername, password: authPassword }).first();
+                    if(!user) return alert("Username atau Password salah!");
+                    setCurrentUser(user);
+                    await loadCompanies(user.id);
+                }
+            };
+
+            const loadCompanies = async (userId) => {
+                const list = await db.companies.where('userId').equals(userId).toArray();
+                setCompanies(list);
+                if(list.length > 0) setActiveCompany(list[0]);
+                else setActiveCompany(null);
+            };
+
+            const handleAddCompany = async (e) => {
+                e.preventDefault();
+                if(!newCompName) return;
+                await db.companies.add({ userId: currentUser.id, name: newCompName, type: newCompType });
+                setNewCompName('');
+                await loadCompanies(currentUser.id);
+            };
+
+            const loadTenantData = async () => {
+                if(!activeCompany) return;
+                const cId = activeCompany.id;
+                setMenus(await db.menus.where('companyId').equals(cId).toArray());
+                setStocks(await db.stocks.where('companyId').equals(cId).toArray());
+                setTxs(await db.txs.where('companyId').equals(cId).reverse().toArray());
+                setOpexList(await db.opex.where('companyId').equals(cId).reverse().toArray());
+                setCart([]);
+                setAiAnalysis(null);
+            };
+
+            useEffect(() => { loadTenantData(); }, [activeCompany]);
+
+            // HPP Calculator
+            const getMenuCOGS = (recipe) => {
+                if (!recipe || !recipe.length) return 0;
+                return recipe.reduce((acc, curr) => {
+                    const stk = stocks.find(s => s.id === parseInt(curr.stockId));
+                    return acc + (stk ? stk.price * (parseFloat(curr.qty) || 0) : 0);
+                }, 0);
+            };
+
+            // Financial Summaries
+            const totalRevenue = useMemo(() => txs.reduce((a, b) => a + b.total, 0), [txs]);
+            const totalCOGS = useMemo(() => txs.reduce((a, b) => a + (b.hppTotal || 0), 0), [txs]);
+            const grossProfit = totalRevenue - totalCOGS;
+            const totalOpex = useMemo(() => opexList.reduce((a, b) => a + b.amount, 0), [opexList]);
+            const netProfit = grossProfit - totalOpex;
+            const totalStockValue = useMemo(() => stocks.reduce((a, b) => a + (b.qty * b.price), 0), [stocks]);
+
+            // --------------------------------------------------
+            // ENGINE AI ANALYTICS (RULES & DIAGNOSTIC LOGIC)
+            // --------------------------------------------------
+            const runAiDiagnosis = () => {
+                setIsAnalyzing(true);
+                setTimeout(() => {
+                    let score = 100;
+                    let diagnosis = [];
+                    let recommendations = [];
+
+                    // Rule 1: Margin Profit Analysis
+                    const marginPercent = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+                    if (totalRevenue > 0 && marginPercent < 30) {
+                        score -= 25;
+                        diagnosis.push(`Margin Laba Kotor tipis (${marginPercent.toFixed(1)}%). Beban HPP/Bahan baku terlalu mahal.`);
+                        recommendations.push(`Naikkan harga jual produk, atau negosiasi ulang harga beli bahan ke supplier.`);
+                    }
+
+                    // Rule 2: Variable Cost (OPEX) Pressure
+                    const opexRatio = totalRevenue > 0 ? (totalOpex / totalRevenue) * 100 : 0;
+                    if (opexRatio > 35) {
+                        score -= 25;
+                        diagnosis.push(`Biaya Operasional (Listrik/Gaji/dll) memakan ${opexRatio.toFixed(1)}% dari total Omset!`);
+                        recommendations.push(`Lakukan efisiensi operasional. Evaluasi penggunaan energi listrik atau optimasi jam kerja tenaga kerja.`);
+                    } else if (totalOpex === 0 && txs.length > 0) {
+                        score -= 10;
+                        diagnosis.push(`Belum ada data Biaya Operasional (Listrik/Gaji) yang dimasukkan. Angka Net Profit belum akurat!`);
+                        recommendations.push(`Catat semua pengeluaran rutin di menu Biaya Variabel (OPEX) agar pembukuan tidak culas.`);
+                    }
+
+                    // Rule 3: Net Profit Status
+                    if (netProfit < 0 && totalRevenue > 0) {
+                        score -= 30;
+                        diagnosis.push(`Usaha mengalami RUGI BERSIH sebesar Rp ${Math.abs(netProfit).toLocaleString('id-ID')}.`);
+                        recommendations.push(`Stop promosi diskon! Fokus jual produk dengan margin tertinggi untuk menutup biaya operasional.`);
+                    }
+
+                    // Rule 4: Dead Stock / Inventory Warning
+                    const lowStock = stocks.filter(s => s.qty < 5);
+                    if (lowStock.length > 0) {
+                        diagnosis.push(`Ada ${lowStock.length} bahan/sparepart gudang yang stoknya menipis (< 5 unit).`);
+                        recommendations.push(`Segera lakukan restock untuk: ${lowStock.map(s => s.name).join(', ')} agar operasional tidak terhenti.`);
+                    }
+
+                    // Default Case if Good
+                    if (diagnosis.length === 0) {
+                        diagnosis.push(`Performa keuangan usaha ${activeCompany.name} sangat sehat! Margin dan operasional terkendali dengan baik.`);
+                        recommendations.push(`Pertahankan kontrol biaya dan pertimbangkan untuk membuka cabang baru atau menambah variasi produk.`);
+                    }
+
+                    setAiAnalysis({
+                        score: Math.max(0, score),
+                        diagnosis,
+                        recommendations,
+                        opexRatio: opexRatio.toFixed(1),
+                        marginRatio: marginPercent.toFixed(1)
+                    });
+                    setIsAnalyzing(false);
+                }, 800);
+            };
+
+            // Checkout Handler
+            const handleCheckout = async () => {
+                if (!cart.length || !activeCompany) return;
+
+                for (let item of cart) {
+                    if (item.ingredients) {
+                        for (let ing of item.ingredients) {
+                            const stk = stocks.find(s => s.id === parseInt(ing.stockId));
+                            const reqQty = ing.qty * item.qty;
+                            if (!stk || stk.qty < reqQty) {
+                                alert(`Stok ${stk ? stk.name : 'Bahan'} tidak cukup! Butuh ${reqQty.toFixed(2)}, Sisa: ${stk?.qty || 0}`);
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                for (let item of cart) {
+                    if (item.ingredients) {
+                        for (let ing of item.ingredients) {
+                            const stk = stocks.find(s => s.id === parseInt(ing.stockId));
+                            if (stk) {
+                                await db.stocks.update(stk.id, { qty: stk.qty - (ing.qty * item.qty) });
+                            }
+                        }
+                    }
+                }
+
+                const itemsData = cart.map(c => ({
+                    menuId: c.id, name: c.name, price: c.price, qty: c.qty, hpp: getMenuCOGS(c.ingredients)
+                }));
+                const txTotal = itemsData.reduce((a, b) => a + (b.price * b.qty), 0);
+                const txHppTotal = itemsData.reduce((a, b) => a + (b.hpp * b.qty), 0);
+
+                await db.txs.add({
+                    companyId: activeCompany.id,
+                    createdAt: new Date().toISOString(),
+                    items: itemsData,
+                    total: txTotal,
+                    hppTotal: txHppTotal
+                });
+
+                setCart([]);
+                setCheckoutModal(false);
+                await loadTenantData();
+            };
+
+            // Save Variable Cost / OPEX
+            const handleSaveOpex = async () => {
+                if(!formOpex.name || !formOpex.amount || !activeCompany) return alert("Isi nama & nominal biaya!");
+                await db.opex.add({
+                    companyId: activeCompany.id,
+                    name: formOpex.name,
+                    category: formOpex.category,
+                    amount: parseFloat(formOpex.amount),
+                    createdAt: new Date().toISOString()
+                });
+                setFormOpex({ name: '', amount: '', category: 'Listrik / Air' });
+                setOpexModal(false);
+                await loadTenantData();
+            };
+
+            const handleSaveBahan = async () => {
+                if (!formBahan.name || !formBahan.price || !formBahan.qty || !activeCompany) return alert("Lengkapi data!");
+                await db.stocks.add({
+                    companyId: activeCompany.id,
+                    name: formBahan.name,
+                    unit: formBahan.unit,
+                    price: parseFloat(formBahan.price),
+                    qty: parseFloat(formBahan.qty)
+                });
+                setFormBahan({ name: '', unit: 'pcs', price: '', qty: '' });
+                setBahanModal(false);
+                await loadTenantData();
+            };
+
+            const handleSaveMenu = async () => {
+                if (!formMenu.name || !formMenu.price || !activeCompany) return alert("Lengkapi data!");
+                await db.menus.add({
+                    companyId: activeCompany.id,
+                    name: formMenu.name,
+                    price: parseFloat(formMenu.price),
+                    icon: formMenu.icon || '📦',
+                    ingredients: formMenu.ingredients.filter(i => i.stockId && i.qty)
+                });
+                setFormMenu({ name: '', price: '', icon: '📦', ingredients: [{ stockId: '', qty: '' }] });
+                setMenuModal(false);
+                await loadTenantData();
+            };
+
+            // SCREEN 1: LOGIN
+            if (!currentUser) {
+                return (
+                    <div className="app-container p-6 flex flex-col justify-center bg-slate-900 text-white">
+                        <div className="text-center mb-8">
+                            <h1 className="text-3xl font-black text-blue-400">KasirKu Master</h1>
+                            <p className="text-xs font-bold text-slate-400 mt-1">Multi-Tenant & AI Intelligent POS</p>
+                        </div>
+                        <form onSubmit={handleAuth} className="bg-slate-800 p-5 rounded-3xl border border-slate-700 space-y-4">
+                            <h2 className="font-extrabold text-sm text-slate-200">{isSignUp ? 'Daftar Akun' : 'Login Sistem'}</h2>
+                            <input type="text" value={authUsername} onChange={e=>setAuthUsername(e.target.value)} className="w-full p-3 border border-slate-600 rounded-xl text-xs font-bold bg-slate-900 text-white outline-none" placeholder="Username" />
+                            <input type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} className="w-full p-3 border border-slate-600 rounded-xl text-xs font-bold bg-slate-900 text-white outline-none" placeholder="Password" />
+                            <button type="submit" className="w-full py-3.5 bg-blue-600 font-extrabold text-xs rounded-xl">{isSignUp ? 'Sign Up' : 'Sign In'}</button>
+                        </form>
+                        <button onClick={() => setIsSignUp(!isSignUp)} className="mt-4 text-xs font-bold text-blue-400 text-center">{isSignUp ? 'Sudah ada akun? Login' : 'Buat akun baru'}</button>
+                    </div>
+                );
+            }
+
+            // SCREEN 2: MAIN DASHBOARD
+            return (
+                <div className="app-container border-x border-slate-200 shadow-2xl">
+                    {/* HEADER */}
+                    <header className="p-3 bg-slate-900 text-white sticky top-0 z-20 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xl">🏬</span>
+                            <div>
+                                <span className="text-[9px] font-black text-slate-400 uppercase block">Active Business:</span>
+                                <select 
+                                    value={activeCompany?.id || ''} 
+                                    onChange={(e) => setActiveCompany(companies.find(c => c.id === parseInt(e.target.value)))}
+                                    className="font-extrabold text-xs bg-slate-800 text-blue-400 rounded-lg px-2 py-1 outline-none border border-slate-700"
+                                >
+                                    {companies.map(c => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        <button onClick={() => setCurrentUser(null)} className="text-[10px] font-extrabold text-red-400 bg-red-950/50 border border-red-800 px-2 py-1 rounded-lg">Logout</button>
+                    </header>
+
+                    {!activeCompany ? (
+                        <div className="p-6 flex-1 flex flex-col justify-center items-center text-center">
+                            <div className="p-4 bg-amber-50 border border-amber-200 rounded-3xl space-y-3 w-full">
+                                <h3 className="font-extrabold text-sm text-amber-800">Belum Ada Usaha</h3>
+                                <form onSubmit={handleAddCompany} className="space-y-2 text-left pt-2">
+                                    <input type="text" value={newCompName} onChange={e=>setNewCompName(e.target.value)} placeholder="Nama Usaha (ex: Resto / Bengkel)" className="w-full p-2.5 border rounded-xl text-xs font-bold" />
+                                    <select value={newCompType} onChange={e=>setNewCompType(e.target.value)} className="w-full p-2.5 border rounded-xl text-xs font-bold">
+                                        <option value="Kuliner">Kuliner / Makanan</option>
+                                        <option value="Otomotif">Otomotif / Jasa</option>
+                                        <option value="Ritel">Ritel / Toko</option>
+                                    </select>
+                                    <button type="submit" className="w-full py-2.5 bg-blue-600 text-white font-black text-xs rounded-xl">+ Tambah Entity Usaha</button>
+                                </form>
+                            </div>
+                        </div>
+                    ) : (
+                        <main className="flex-1 p-4 pb-28 overflow-y-auto w-full">
+                            {/* TAB 1: KASIR POS */}
+                            {tab === 'kasir' && (
+                                <div>
+                                    <div className="grid grid-cols-2 gap-3 mb-6">
+                                        {menus.map(m => {
+                                            const cogs = getMenuCOGS(m.ingredients);
+                                            return (
+                                                <div key={m.id} onClick={() => {
+                                                    const exist = cart.find(c => c.id === m.id);
+                                                    if(exist) setCart(cart.map(c => c.id === m.id ? {...c, qty: c.qty + 1} : c));
+                                                    else setCart([...cart, {...m, qty: 1}]);
+                                                }} className="p-3.5 bg-white border rounded-2xl shadow-xs cursor-pointer active:scale-95 transition-all flex flex-col justify-between">
+                                                    <div>
+                                                        <div className="flex justify-between items-start">
+                                                            <div className="text-2xl mb-1">{m.icon}</div>
+                                                            <span className="text-[9px] font-bold bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">HPP: Rp {cogs.toLocaleString('id-ID')}</span>
+                                                        </div>
+                                                        <div className="font-extrabold text-slate-800 text-xs mt-1">{m.name}</div>
+                                                        <div className="text-blue-600 font-black text-xs mt-0.5">Rp {m.price.toLocaleString('id-ID')}</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    {cart.length > 0 && (
+                                        <div className="p-4 bg-white border rounded-2xl space-y-2">
+                                            <div className="font-extrabold text-xs text-slate-400 uppercase">Keranjang Belanja</div>
+                                            {cart.map(c => (
+                                                <div key={c.id} className="flex justify-between items-center text-xs py-1 border-b">
+                                                    <div><div className="font-bold">{c.name}</div><div className="text-slate-400">Rp {(c.price * c.qty).toLocaleString('id-ID')}</div></div>
+                                                    <span className="font-black bg-slate-100 px-2 py-1 rounded">{c.qty}x</span>
+                                                </div>
+                                            ))}
+                                            <button onClick={() => setCheckoutModal(true)} className="w-full mt-2 py-3 bg-blue-600 text-white font-black text-xs rounded-xl">Bayar Rp {cart.reduce((a,b)=>a+(b.price*b.qty),0).toLocaleString('id-ID')}</button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* TAB 2: VARIABLE COST (OPEX) & GUDANG */}
+                            {tab === 'biaya' && (
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-amber-500 text-white rounded-3xl flex justify-between items-center">
+                                        <div>
+                                            <div className="text-[10px] font-bold uppercase opacity-80">Total Biaya Operasional (OPEX)</div>
+                                            <div className="text-2xl font-black mt-0.5">Rp {totalOpex.toLocaleString('id-ID')}</div>
+                                        </div>
+                                        <button onClick={() => setOpexModal(true)} className="px-3 py-2 bg-white text-amber-900 font-black text-xs rounded-xl">+ Biaya</button>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <h3 className="font-extrabold text-xs text-slate-700 uppercase">Rincian Biaya Variabel (Listrik, Tenaga, dll)</h3>
+                                        {opexList.length === 0 ? <p className="text-xs text-slate-400 italic">Belum ada biaya operasional dicatat.</p> : null}
+                                        {opexList.map(o => (
+                                            <div key={o.id} className="p-3 bg-white border rounded-2xl flex justify-between items-center text-xs">
+                                                <div>
+                                                    <div className="font-extrabold text-slate-800">{o.name}</div>
+                                                    <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">{o.category}</span>
+                                                </div>
+                                                <div className="font-black text-red-600">- Rp {o.amount.toLocaleString('id-ID')}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 3: GUDANG */}
+                            {tab === 'gudang' && (
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <h3 className="font-extrabold text-xs text-slate-700 uppercase">Stok Gudang ({activeCompany.name})</h3>
+                                        <button onClick={() => setBahanModal(true)} className="px-2.5 py-1 bg-blue-600 text-white font-extrabold text-xs rounded-xl">+ Bahan Gudang</button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {stocks.map(s => (
+                                            <div key={s.id} className="p-3 bg-white border rounded-2xl flex justify-between items-center text-xs">
+                                                <div><div className="font-extrabold text-slate-800">{s.name}</div><div className="text-slate-400">Rp {s.price.toLocaleString('id-ID')} / {s.unit}</div></div>
+                                                <div className="text-right"><div className="font-black text-slate-800">{s.qty.toFixed(2)} {s.unit}</div></div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 4: AI DIAGNOSTICS & FINANCIAL ANALYTICS */}
+                            {tab === 'ai' && (
+                                <div className="space-y-4">
+                                    {/* RINGKASAN FINANSIAL REAL */}
+                                    <div className="p-4 bg-slate-900 text-white rounded-3xl space-y-3">
+                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                                            <span className="text-xs font-bold text-slate-400">Omset (Revenue)</span>
+                                            <span className="font-black text-sm text-emerald-400">Rp {totalRevenue.toLocaleString('id-ID')}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                                            <span className="text-xs font-bold text-slate-400">Total HPP / Bahan Baku</span>
+                                            <span className="font-black text-sm text-amber-400">- Rp {totalCOGS.toLocaleString('id-ID')}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                                            <span className="text-xs font-bold text-slate-400">Laba Kotor (Gross Profit)</span>
+                                            <span className="font-black text-sm text-blue-400">Rp {grossProfit.toLocaleString('id-ID')}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                                            <span className="text-xs font-bold text-slate-400">Biaya Operasional (OPEX)</span>
+                                            <span className="font-black text-sm text-red-400">- Rp {totalOpex.toLocaleString('id-ID')}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center pt-1">
+                                            <span className="text-xs font-extrabold text-white">Laba Bersih (Net Profit)</span>
+                                            <span className={`font-black text-lg ${netProfit >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>Rp {netProfit.toLocaleString('id-ID')}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* AI DIAGNOSTIC BUTTON & BOX */}
+                                    <button onClick={runAiDiagnosis} disabled={isAnalyzing} className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-xs rounded-2xl shadow-lg flex items-center justify-center gap-2">
+                                        <span>{isAnalyzing ? '🔄 Menganalisis Data...' : '🤖 Jalankan AI Diagnostic Business Engine'}</span>
+                                    </button>
+
+                                    {aiAnalysis && (
+                                        <div className="p-4 bg-purple-50 border border-purple-200 rounded-3xl space-y-4">
+                                            <div className="flex justify-between items-center">
+                                                <div>
+                                                    <h4 className="font-black text-purple-900 text-sm">AI Health Score</h4>
+                                                    <p className="text-[10px] text-purple-700 font-bold">Diagnosa Performa {activeCompany.name}</p>
+                                                </div>
+                                                <div className="text-2xl font-black text-purple-700 bg-purple-200 px-3 py-1 rounded-2xl">{aiAnalysis.score}%</div>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <div className="text-xs font-extrabold text-purple-900 uppercase">🔍 Temuan Diagnosa:</div>
+                                                <ul className="space-y-1">
+                                                    {aiAnalysis.diagnosis.map((d, i) => (
+                                                        <li key={i} className="text-xs font-bold text-purple-800 flex items-start gap-1.5">
+                                                            <span>•</span> <span>{d}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+
+                                            <div className="space-y-2 border-t border-purple-200 pt-3">
+                                                <div className="text-xs font-extrabold text-indigo-900 uppercase">💡 Rekomendasi AI:</div>
+                                                <ul className="space-y-1">
+                                                    {aiAnalysis.recommendations.map((r, i) => (
+                                                        <li key={i} className="text-xs font-semibold text-indigo-900 bg-white p-2 rounded-xl border border-purple-100">
+                                                            👉 {r}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* TAB 5: PENGATURAN MENU */}
+                            {tab === 'pengaturan' && (
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-white border rounded-2xl space-y-2">
+                                        <div className="flex justify-between items-center">
+                                            <h3 className="font-extrabold text-xs text-slate-800">Master Menu / Jasa</h3>
+                                            <button onClick={() => setMenuModal(true)} className="px-2.5 py-1 bg-blue-600 text-white font-extrabold text-xs rounded-xl">+ Menu Baru</button>
+                                        </div>
+                                        {menus.map(m => (
+                                            <div key={m.id} className="p-2.5 bg-slate-50 rounded-xl text-xs flex justify-between items-center">
+                                                <div><div className="font-bold">{m.icon} {m.name}</div><div className="text-slate-400">Rp {m.price.toLocaleString('id-ID')}</div></div>
+                                                <span className="text-[10px] bg-blue-50 text-blue-600 font-bold px-2 py-0.5 rounded">{m.ingredients?.length || 0} Bahan</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </main>
+                    )}
+
+                    {/* MODAL BIAYA VARIABEL (OPEX) */}
+                    {opexModal && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+                            <div className="bg-white w-full max-w-[480px] p-5 rounded-t-3xl space-y-3">
+                                <h3 className="font-extrabold text-slate-800 text-sm">Catat Biaya Operasional / Variabel</h3>
+                                <input type="text" value={formOpex.name} onChange={e=>setFormOpex({...formOpex, name: e.target.value})} placeholder="Keterangan Biaya (ex: Token Listrik / Gaji Kasir A)" className="w-full p-2.5 border rounded-xl text-xs font-bold" />
+                                <select value={formOpex.category} onChange={e=>setFormOpex({...formOpex, category: e.target.value})} className="w-full p-2.5 border rounded-xl text-xs font-bold">
+                                    <option value="Listrik / Air">Listrik & Air</option>
+                                    <option value="Tenaga Kerja / Gaji">Gaji Tenaga Kerja / Kasir</option>
+                                    <option value="Sewa Tempat">Sewa Tempat / Lapak</option>
+                                    <option value="Internet / Pulsa">Internet & Komunikasi</option>
+                                    <option value="Lain-lain">Lain-lain / Maintenance</option>
+                                </select>
+                                <input type="number" value={formOpex.amount} onChange={e=>setFormOpex({...formOpex, amount: e.target.value})} placeholder="Nominal Pengeluaran (Rp)" className="w-full p-2.5 border rounded-xl text-xs font-bold" />
+                                <div className="flex gap-2 pt-2">
+                                    <button onClick={() => setOpexModal(false)} className="flex-1 py-2.5 border font-bold text-xs rounded-xl">Batal</button>
+                                    <button onClick={handleSaveOpex} className="flex-1 py-2.5 bg-amber-600 text-white font-bold text-xs rounded-xl">Simpan Biaya</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL CHECKOUT */}
+                    {checkoutModal && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+                            <div className="bg-white w-full max-w-[480px] p-5 rounded-t-3xl space-y-3">
+                                <h3 className="font-extrabold text-slate-800 text-base">Konfirmasi Pembayaran</h3>
+                                <div className="flex gap-2 pt-2">
+                                    <button onClick={() => setCheckoutModal(false)} className="flex-1 py-3 border font-bold text-xs rounded-xl">Batal</button>
+                                    <button onClick={handleCheckout} className="flex-1 py-3 bg-blue-600 text-white font-bold text-xs rounded-xl">Proses Transaksi</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL BAHAN GUDANG */}
+                    {bahanModal && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+                            <div className="bg-white w-full max-w-[480px] p-5 rounded-t-3xl space-y-3">
+                                <h3 className="font-extrabold text-slate-800 text-sm">Tambah Bahan Gudang ({activeCompany.name})</h3>
+                                <input type="text" value={formBahan.name} onChange={e=>setFormBahan({...formBahan, name: e.target.value})} placeholder="Nama Bahan / Sparepart" className="w-full p-2 border rounded-xl text-xs" />
+                                <div className="grid grid-cols-2 gap-2">
+                                    <input type="text" value={formBahan.unit} onChange={e=>setFormBahan({...formBahan, unit: e.target.value})} placeholder="Satuan (kg/pcs/L)" className="w-full p-2 border rounded-xl text-xs" />
+                                    <input type="number" value={formBahan.qty} onChange={e=>setFormBahan({...formBahan, qty: e.target.value})} placeholder="Stok Awal" className="w-full p-2 border rounded-xl text-xs" />
+                                </div>
+                                <input type="number" value={formBahan.price} onChange={e=>setFormBahan({...formBahan, price: e.target.value})} placeholder="Harga Beli per Satuan" className="w-full p-2 border rounded-xl text-xs" />
+                                <div className="flex gap-2 pt-2">
+                                    <button onClick={() => setBahanModal(false)} className="flex-1 py-2.5 border font-bold text-xs rounded-xl">Batal</button>
+                                    <button onClick={handleSaveBahan} className="flex-1 py-2.5 bg-blue-600 text-white font-bold text-xs rounded-xl">Simpan Gudang</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL MENU & RESEP */}
+                    {menuModal && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+                            <div className="bg-white w-full max-w-[480px] p-5 rounded-t-3xl space-y-3 max-h-[85vh] overflow-y-auto">
+                                <h3 className="font-extrabold text-slate-800 text-sm">Tambah Menu & Resep Gudang</h3>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <input type="text" value={formMenu.name} onChange={e=>setFormMenu({...formMenu, name: e.target.value})} placeholder="Nama Menu/Jasa" className="col-span-2 p-2 border rounded-xl text-xs" />
+                                    <input type="text" value={formMenu.icon} onChange={e=>setFormMenu({...formMenu, icon: e.target.value})} placeholder="Emoji" className="p-2 border rounded-xl text-xs text-center" />
+                                </div>
+                                <input type="number" value={formMenu.price} onChange={e=>setFormMenu({...formMenu, price: e.target.value})} placeholder="Harga Jual (Rp)" className="w-full p-2 border rounded-xl text-xs" />
+                                <div className="border-t pt-2 space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-xs font-bold text-slate-700">Resep Bahan Baku (Gudang)</label>
+                                        <button type="button" onClick={() => setFormMenu({...formMenu, ingredients: [...formMenu.ingredients, { stockId: '', qty: '' }]})} className="text-[11px] font-extrabold text-blue-600">+ Resep</button>
+                                    </div>
+                                    {formMenu.ingredients.map((ing, idx) => (
+                                        <div key={idx} className="flex gap-2">
+                                            <select value={ing.stockId} onChange={e => {
+                                                const newIng = [...formMenu.ingredients];
+                                                newIng[idx].stockId = e.target.value;
+                                                setFormMenu({...formMenu, ingredients: newIng});
+                                            }} className="flex-1 p-2 border rounded-xl text-xs">
+                                                <option value="">-- Pilih Bahan --</option>
+                                                {stocks.map(s => <option key={s.id} value={s.id}>{s.name} ({s.unit})</option>)}
+                                            </select>
+                                            <input type="number" step="0.001" value={ing.qty} onChange={e => {
+                                                const newIng = [...formMenu.ingredients];
+                                                newIng[idx].qty = e.target.value;
+                                                setFormMenu({...formMenu, ingredients: newIng});
+                                            }} placeholder="Takaran" className="w-20 p-2 border rounded-xl text-xs" />
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex gap-2 pt-2">
+                                    <button onClick={() => setMenuModal(false)} className="flex-1 py-2.5 border font-bold text-xs rounded-xl">Batal</button>
+                                    <button onClick={handleSaveMenu} className="flex-1 py-2.5 bg-blue-600 text-white font-bold text-xs rounded-xl">Simpan Menu</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* BOTTOM NAVIGATION */}
+                    <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white border-t flex justify-around py-2 z-20 shadow-lg">
+                        {[
+                            { id: 'kasir', label: 'Kasir', icon: '🛒' },
+                            { id: 'biaya', label: 'Biaya OPEX', icon: '⚡' },
+                            { id: 'gudang', label: 'Gudang', icon: '📦' },
+                            { id: 'ai', label: 'AI Diagnostic', icon: '🤖' },
+                            { id: 'pengaturan', label: 'Atur Menu', icon: '⚙️' }
+                        ].map(t => (
+                            <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-col items-center text-[10px] font-bold ${tab === t.id ? 'text-blue-600' : 'text-slate-400'}`}>
+                                <span className="text-base leading-none">{t.icon}</span>
+                                {t.label}
+                            </button>
+                        ))}
+                    </nav>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
